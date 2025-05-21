@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="default_email_template">
+        <t t-name="universal_email_sender.default_email_template">
+            <html>
+                <head>
+                    <style>
+                        p {
+                            color: blue;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <p>Hello {{ user_name }}!</p>
+                    <p>This is a test email.</p>
+                </body>
+            </html>
+        </t>
+    </template>
+</odoo>
