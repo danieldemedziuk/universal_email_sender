@@ -1,49 +1,77 @@
-import base64
+from odoo import models, api
+import jinja2
 import cssutils
 from premailer import transform
-from jinja2 import Template
-from odoo import models, api
-from odoo.exceptions import UserError
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import base64
+import logging
+import os
+
+_logger = logging.getLogger(__name__)
 
 class EmailService(models.AbstractModel):
     _name = 'email.service'
-    _description = 'Usługa wysyłania wiadomości e-mail'
+    _description = 'Universal Email Sending Service'
 
-    @api.model
-    def send_email(self, subject, template_body, email_to, email_from=None, attachments=None, context_data=None):
-        if not email_from:
-            email_from = self.env.user.email or self.env.user.company_id.email
-        if not email_from:
-            raise UserError("Brakuje adresu e-mail nadawcy.")
-
-        # Renderowanie Jinja2
-        if context_data is None:
-            context_data = {}
-        jinja_template = Template(template_body)
-        rendered_body = jinja_template.render(**context_data)
-
-        # Inlining CSS
-        cssutils.log.setLevel("FATAL")
-        final_html = transform(rendered_body)
-
-        mail_values = {
-            'subject': subject,
-            'body_html': final_html,
-            'email_to': email_to,
-            'email_from': email_from,
-            'auto_delete': False,
+    def _get_smtp_config(self):
+        host = self.env['ir.config_parameter'].sudo().get_param('mj_settings.smtp_mj_host', default=False)
+        port = self.env['ir.config_parameter'].sudo().get_param('mj_settings.smtp_mj_port', default=0)
+        user = self.env['ir.config_parameter'].sudo().get_param('mj_settings.smtp_mj_user', default=False)
+        pwd = self.env['ir.config_parameter'].sudo().get_param('mj_settings.smtp_mj_pwd', default=False)
+        sender = self.env['ir.config_parameter'].sudo().get_param('mj_settings.smtp_mj_sender', default=False)
+        
+        return {
+            'host': host,
+            'port': port,
+            'user': user,
+            'password': pwd
         }
 
-        if attachments:
-            mail_values['attachment_ids'] = []
-            for name, content in attachments.items():
-                attachment = self.env['ir.attachment'].create({
-                    'name': name,
-                    'type': 'binary',
-                    'datas': base64.b64encode(content).decode(),
-                    'mimetype': 'application/octet-stream',
-                })
-                mail_values['attachment_ids'].append((4, attachment.id))
+    def _render_template(self, template_str, context):
+        template = jinja2.Template(template_str)
+        html = template.render(**context)
 
-        mail = self.env['mail.mail'].create(mail_values)
-        mail.send()
+        css_path = os.path.join(os.path.dirname(__file__), '../static/src/scss/email_styles.scss')
+        with open(css_path, 'r', encoding='utf-8') as f:
+            css = f.read()
+
+        style_tag = f"<style>{css}</style>"
+        html_with_style = f"{style_tag}\n{html}"
+        return transform(html_with_style)
+
+    def send_email(self, subject, template_body, email_to, context_data=None, attachments=None, link_record=None):
+        smtp = self._get_smtp_config()
+        context_data = context_data or {}
+        
+        if link_record:
+            base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+            context_data['odoo_link'] = f"{base_url}/web#id={link_record.id}&model={link_record._name}&view_type=form"
+
+        html_body = self._render_template(template_body, context_data)
+
+        msg = MIMEMultipart()
+        msg['From'] = smtp['user']
+        msg['To'] = email_to
+        msg['Subject'] = subject
+        msg.attach(MIMEText(html_body, 'html'))
+
+        for attach in (attachments or []):
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(base64.b64decode(attach['data']))
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{attach["filename"]}"')
+            msg.attach(part)
+
+        try:
+            server = smtplib.SMTP(smtp['host'], smtp['port'])
+            server.starttls()
+            server.login(smtp['user'], smtp['password'])
+            server.sendmail(smtp['user'], email_to, msg.as_string())
+            server.quit()
+        except Exception as e:
+            _logger.exception("Email sending failed: %s", e)
+            raise

@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <template id="default_email_template">
-        <t t-name="universal_email_sender.default_email_template">
-            <html>
-                <head>
-                    <style>
-                        p {
-                            color: blue;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <p>Hello {{ user_name }}!</p>
-                    <p>This is a test email.</p>
-                </body>
-            </html>
-        </t>
-    </template>
+    <record id="email_template_base" model="ir.ui.view">
+        <field name="name">email_template_base</field>
+        <field name="type">qweb</field>
+        <field name="arch" type="xml">
+            <t t-name="email_template.base">
+                <div class="email-body">
+                    <h2 class="email-subject">{{ subject }}</h2>
+                    <div class="email-content">{{ body }}</div>
+                    <t t-if="odoo_link">
+                        <p class="email-link"><a href="{{ odoo_link }}">Zobacz w Odoo</a></p>
+                    </t>
+                </div>
+            </t>
+        </field>
+    </record>
 </odoo>
